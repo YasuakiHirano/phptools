@@ -1,4 +1,6 @@
 <?php
+namespace DBLib;
+
 class DBMysqli {
 
     private $mysqli;
@@ -6,11 +8,40 @@ class DBMysqli {
     private $logtype = 0;
 
     public function __construct($host, $username, $password, $dbname) {
-        $this->mysqli = new mysqli($host, $username, $password, $dbname);
+        $this->mysqli = new \mysqli($host, $username, $password, $dbname);
         if($this->mysqli->connect_error) {
             error_log($this->mysqli->connect_error , $this->logtype);
             exit;
         }
+    }
+
+    public function selectPrepare($table, $column = '*', $where, $values){
+      $this->emptyValidate(array('table' => $table, 'where' => $where));
+
+      $sql = "SELECT {$column} FROM {$table} WHERE {$where} ";
+
+      if($stmt = $this->mysqli->prepare($sql)){
+        $params = [];
+        foreach($values as $val) {
+          $params[0] .= 's';
+          $params[] = &$val;
+        }
+
+        \call_user_func_array(array($stmt, 'bind_param'), $params); 
+
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $datas = array();
+        while($ret = $result->fetch_assoc()){
+          array_push($datas, $ret);
+        }
+
+        $stmt->close();
+
+        return $datas;
+      }
+
+      return false;
     }
 
     public function select($table, $column = '*', $where = '', $option = MYSQLI_ASSOC) {
@@ -96,6 +127,50 @@ class DBMysqli {
       return $res;
     }
 
+    public function insertPrepare($table, $values){
+      $this->emptyValidate(array('table' => $table));
+
+      $where_values = '';
+      $column = '';
+      foreach($values as $key => $val){
+        $column .= "{$key},";
+        $where_values .= '?,';
+      }
+      $column = substr($column, 0, -1);
+      $where_values = substr($where_values, 0, -1);
+
+      $sql = "INSERT INTO {$table} ({$column}) VALUES ({$where_values}) ";
+
+      if($stmt = $this->mysqli->prepare($sql)){
+        $params = [];
+        foreach($values as $key => $val) {
+          if(is_int($val)){
+            $params[0] .= "i";
+          } elseif(is_double($val)){
+            $params[0] .= "d";
+          } else {
+            if(strpos($val, "\0") === false){
+              $params[0] .= "s";
+              $val = (string)$val;
+            } else {
+              $params[0] .= "b";
+            }
+          }
+
+          $params[] = &$values[$key];
+        }
+
+        call_user_func_array(array($stmt, 'bind_param'), $params); 
+
+        $stmt->execute();
+        $stmt->close();
+
+        return true;
+      }
+
+      return false;
+    }
+
     public function delete($table, $where = ''){
       $this->emptyValidate(array('table' => $table));
       $sql = "DELETE FROM {$table} ";
@@ -169,6 +244,10 @@ class DBMysqli {
         }
 
         $this->mysqli->autocommit(TRUE);
+    }
+
+    public function close(){
+        $this->mysqli->close();
     }
 
     public function queryExec($sql){
